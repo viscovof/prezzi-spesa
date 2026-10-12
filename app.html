@@ -1,0 +1,191 @@
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prezzi Spesa</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+body{font-family:-apple-system,sans-serif;background:#f5f4ef;color:#252920;max-width:650px;margin:auto;padding:18px}
+.card{background:white;padding:17px;border-radius:15px;margin:15px 0}
+input,button{font:inherit;padding:12px;border-radius:9px;width:100%;box-sizing:border-box;margin:5px 0}
+input{border:1px solid #ddd}button{background:#344b38;color:white;border:0;font-weight:bold}
+.secondary{background:#e9eee6;color:#344b38}
+.item{border-top:1px solid #eee;padding:14px 0}.price{font-size:22px;font-weight:bold}
+.small{color:#73766d;font-size:13px} .hidden{display:none}
+</style>
+</head>
+<body>
+<h1>🛒 Prezzi Spesa</h1>
+<p>Storico prezzi e occasioni per fare scorta.</p>
+
+<section class="card" id="login">
+<h2>Il tuo account</h2>
+<input id="email" type="email" placeholder="La tua email" autocomplete="email">
+<input id="password" type="password" placeholder="Password (almeno 6 caratteri)">
+<button id="register">Registrati</button>
+<button id="signin" class="secondary">Accedi</button>
+<p class="small">Alla registrazione potrebbe essere richiesta la conferma via email.</p>
+</section>
+
+<section class="card hidden" id="app">
+<p id="account" class="small"></p>
+<button id="logout" class="secondary">Esci</button>
+<h2>Registra un prezzo</h2>
+<form id="form">
+<label>Prodotto</label><input id="name" required placeholder="Latte 1 litro">
+<label>Prezzo pagato (€)</label><input id="price" type="number" min="0" step=".01" required placeholder="2.20">
+<label>Prezzo obiettivo (€)</label><input id="target" type="number" min="0" step=".01" placeholder="1.90">
+<label>Data</label><input id="date" type="date" required>
+<label>Supermercato</label><input id="shop" placeholder="Lidl">
+<label>Formato</label><input id="unit" placeholder="1 litro">
+<button id="save" type="submit">Salva prezzo online</button>
+</form>
+<p id="msg" class="small"></p>
+</section>
+
+<section class="card hidden" id="history">
+<h2>I tuoi prezzi</h2>
+<input id="search" placeholder="Cerca prodotto">
+<div id="list"></div>
+</section>
+
+<script>
+const client = supabase.createClient(
+  "https://irxncadircstrrzjbqgi.supabase.co",
+  "sb_publishable_3utemn1wPPbpWIJr98Pn6Q_8SMXE3J"
+);
+const $ = id => document.getElementById(id);
+$("date").value = new Date().toLocaleDateString("sv-SE");
+let prices = [];
+
+function euro(n) {
+  return Number(n).toLocaleString("it-IT",{style:"currency",currency:"EUR"});
+}
+function status(t) { $("msg").textContent = t; }
+
+async function showSession(session) {
+  $("login").classList.toggle("hidden",!!session);
+  $("app").classList.toggle("hidden",!session);
+  $("history").classList.toggle("hidden",!session);
+  if(session) {
+    $("account").textContent = "Account: " + session.user.email;
+    await loadPrices();
+  } else {
+    prices = [];
+    $("list").replaceChildren();
+  }
+}
+
+async function auth(mode) {
+  const email = $("email").value.trim();
+  const password = $("password").value;
+  if(!email || password.length < 6) {
+    alert("Inserisci l'email e una password di almeno 6 caratteri.");
+    return;
+  }
+  let r;
+  if(mode === "register") {
+    r = await client.auth.signUp({
+      email,password,
+      options:{emailRedirectTo:"https://viscovof.github.io/prezzi-spesa/app.html"}
+    });
+    if(!r.error && !r.data.session) {
+      alert("Registrazione inviata. Controlla la tua email e conferma l'indirizzo, poi accedi.");
+      return;
+    }
+  } else {
+    r = await client.auth.signInWithPassword({email,password});
+  }
+  if(r.error) alert(r.error.message);
+  else await showSession(r.data.session);
+}
+$("register").onclick = () => auth("register");
+$("signin").onclick = () => auth("signin");
+$("logout").onclick = async () => {
+  await client.auth.signOut();
+  await showSession(null);
+};
+
+async function loadPrices() {
+  const {data,error} = await client.from("prices").select("*")
+    .order("purchase_date",{ascending:false})
+    .order("created_at",{ascending:false});
+  if(error) { status("Errore nel caricamento: "+error.message); return; }
+  prices = data || [];
+  render();
+  status("Prezzi aggiornati online.");
+}
+
+$("form").onsubmit = async e => {
+  e.preventDefault();
+  $("save").disabled = true;
+  const payload = {
+    product_name:$("name").value.trim(),
+    price:Number($("price").value),
+    target_price:$("target").value === "" ? null : Number($("target").value),
+    purchase_date:$("date").value,
+    store:$("shop").value.trim() || null,
+    format:$("unit").value.trim() || null
+  };
+  const {error} = await client.from("prices").insert(payload);
+  $("save").disabled = false;
+  if(error) { status("Errore nel salvataggio: "+error.message); return; }
+  $("form").reset();
+  $("date").value = new Date().toLocaleDateString("sv-SE");
+  await loadPrices();
+};
+$("search").oninput = render;
+
+async function removePrice(id) {
+  if(!confirm("Eliminare questa registrazione?")) return;
+  const {error} = await client.from("prices").delete().eq("id",id);
+  if(error) status("Errore: "+error.message);
+  else await loadPrices();
+}
+
+function render() {
+  const q = $("search").value.toLowerCase().trim();
+  const rows = prices.filter(p => p.product_name.toLowerCase().includes(q));
+  $("list").replaceChildren();
+  if(!rows.length) {
+    $("list").textContent = "Nessun prezzo registrato.";
+    return;
+  }
+  rows.forEach(p => {
+    const item = document.createElement("div");
+    item.className = "item";
+    const name = document.createElement("strong");
+    name.textContent = p.product_name;
+    const price = document.createElement("div");
+    price.className = "price";
+    price.textContent = euro(p.price);
+    const details = document.createElement("div");
+    details.className = "small";
+    details.textContent = [p.purchase_date,p.store,p.format].filter(Boolean).join(" · ");
+    item.append(name,price,details);
+    if(p.target_price !== null) {
+      const target = document.createElement("p");
+      target.className = "small";
+      target.textContent = Number(p.price) <= Number(p.target_price)
+        ? "🎯 Obiettivo raggiunto: "+euro(p.target_price)
+        : "Obiettivo: "+euro(p.target_price)+" · Mancano "+euro(Number(p.price)-Number(p.target_price));
+      item.append(target);
+    }
+    const del = document.createElement("button");
+    del.className = "secondary";
+    del.textContent = "Elimina prezzo";
+    del.onclick = () => removePrice(p.id);
+    item.append(del);
+    $("list").append(item);
+  });
+}
+
+client.auth.onAuthStateChange((_event,session) => {
+  showSession(session);
+});
+client.auth.getSession().then(({data}) => showSession(data.session));
+</script>
+</body>
+</html>
