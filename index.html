@@ -1,0 +1,112 @@
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f5f4ef">
+<title>Prezzi Spesa</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f5f4ef;color:#252920;max-width:700px;margin:auto;padding:20px}
+h1{font-size:30px;margin-bottom:5px}
+p,.small{color:#73766d;line-height:1.5}
+.card{background:white;border:1px solid #e6e5dd;border-radius:16px;padding:17px;margin:15px 0}
+label{display:block;font-size:13px;font-weight:600;margin:12px 0 6px}
+input,button{font:inherit}
+input{width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;background:white}
+button{padding:12px 15px;border:0;border-radius:10px;background:#344b38;color:white;font-weight:600;margin-top:12px;cursor:pointer}
+.secondary{background:#e9eee6;color:#344b38}
+.grid,.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:#e9eee6;border-radius:12px;padding:14px}
+.stat strong{display:block;font-size:23px;margin-top:5px}
+.item{padding:14px 0;border-top:1px solid #eee}
+.price{font-size:23px;font-weight:750}
+.pill{display:inline-block;background:#e3f1dc;color:#315b31;padding:6px 9px;border-radius:20px;font-size:12px;margin-top:7px}
+</style>
+</head>
+<body>
+<h1>🛒 Prezzi Spesa</h1>
+<p>Confronta i prezzi, controlla lo storico e scopri quando conviene fare scorta.</p>
+
+<div class="stats">
+<div class="stat">Prodotti<strong id="count">0</strong></div>
+<div class="stat">Prezzi salvati<strong id="total">0</strong></div>
+</div>
+
+<section class="card">
+<h2>＋ Registra un prezzo</h2>
+<form id="form">
+<label>Nome prodotto</label>
+<input id="name" placeholder="Es. Latte 1 litro" required>
+<div class="grid">
+<div><label>Prezzo pagato (€)</label><input id="price" type="number" min="0.01" step="0.01" placeholder="2.20" required></div>
+<div><label>Prezzo obiettivo (€)</label><input id="target" type="number" min="0" step="0.01" placeholder="1.90"></div>
+</div>
+<div class="grid">
+<div><label>Data acquisto</label><input id="date" type="date" required></div>
+<div><label>Supermercato</label><input id="shop" placeholder="Es. Lidl"></div>
+</div>
+<label>Formato (facoltativo)</label>
+<input id="unit" placeholder="Es. confezione da 6">
+<button type="submit" style="width:100%">Salva prezzo</button>
+</form>
+</section>
+
+<section class="card">
+<h2>🔎 I tuoi prodotti</h2>
+<input id="search" placeholder="Cerca un prodotto...">
+<div id="list"><p>Inserisci il tuo primo prezzo!</p></div>
+</section>
+
+<section class="card">
+<h2>💡 Quando fare scorta</h2>
+<div id="tips"><p>Imposta un prezzo obiettivo quando registri un prodotto.</p></div>
+</section>
+
+<section class="card">
+<h2>📦 Backup dei dati</h2>
+<p>Scarica una copia dei tuoi prezzi per conservarli.</p>
+<button type="button" class="secondary" id="backup">Esporta CSV</button>
+</section>
+
+<script>
+const KEY="prezzi-spesa-v2";
+let data=[];
+try{data=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){}
+const $=id=>document.getElementById(id);
+$("date").value=new Date().toLocaleDateString("sv-SE");
+function euro(v){return Number(v).toLocaleString("it-IT",{style:"currency",currency:"EUR"})}
+function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function save(){localStorage.setItem(KEY,JSON.stringify(data));render()}
+function render(){
+$("total").textContent=data.length;
+$("count").textContent=new Set(data.map(x=>x.name.toLowerCase())).size;
+let q=$("search").value.toLowerCase();
+let rows=data.filter(x=>(x.name+" "+x.shop).toLowerCase().includes(q)).sort((a,b)=>b.date.localeCompare(a.date));
+let groups={};rows.forEach(x=>(groups[x.name.toLowerCase()]??=[]).push(x));
+$("list").innerHTML=Object.values(groups).map(g=>{
+let x=g[0],min=Math.min(...g.map(y=>Number(y.price)));
+let history=g.map(y=>`<div class="small">${esc(y.date)} · ${esc(y.shop)} · ${euro(y.price)}</div>`).join("");
+let good=Number(x.target)>0&&Number(x.price)<=Number(x.target);
+return `<div class="item"><strong>${esc(x.name)}</strong><div class="price">${euro(x.price)}</div><div class="small">${esc(x.shop)} · ${esc(x.date)} ${x.unit?"· "+esc(x.unit):""}</div><div class="small">Minimo registrato: ${euro(min)}</div>${Number(x.target)>0?`<div class="small">Obiettivo scorta: ${euro(x.target)}</div>`:""}${good?'<div class="pill">🎯 Prezzo obiettivo raggiunto!</div>':""}<details style="margin-top:10px"><summary>Storico prezzi (${g.length})</summary>${history}</details><button class="secondary" onclick="removeItem('${x.id}')">Elimina ultimo prezzo</button></div>`
+}).join("")||"<p>Nessun prodotto trovato.</p>";
+let tips=data.filter(x=>Number(x.target)>0&&Number(x.price)<=Number(x.target));
+$("tips").innerHTML=tips.map(x=>`<div class="item"><strong>${esc(x.name)}</strong><p>Prezzo ${euro(x.price)}: hai raggiunto il tuo obiettivo di ${euro(x.target)}. Puoi valutare di fare scorta.</p></div>`).join("")||"<p>Nessun prezzo obiettivo raggiunto per ora.</p>";
+}
+$("form").onsubmit=e=>{
+e.preventDefault();
+data.push({id:Date.now().toString(),name:$("name").value.trim(),price:Number($("price").value),target:$("target").value,date:$("date").value,shop:$("shop").value.trim(),unit:$("unit").value.trim()});
+save();$("form").reset();$("date").value=new Date().toLocaleDateString("sv-SE");
+};
+$("search").oninput=render;
+function removeItem(id){if(confirm("Eliminare questo prezzo?")){data=data.filter(x=>x.id!==id);save()}}
+$("backup").onclick=()=>{
+let rows=[["Prodotto","Prezzo","Obiettivo","Data","Supermercato","Formato"],...data.map(x=>[x.name,x.price,x.target,x.date,x.shop,x.unit])];
+let csv="\uFEFF"+rows.map(r=>r.map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(";")).join("\r\n");
+let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="prezzi-spesa.csv";a.click();URL.revokeObjectURL(a.href);
+};
+render();
+</script>
+</body>
+</html>
